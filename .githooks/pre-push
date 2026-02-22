@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -e
+
+echo "Running secret scan before push..."
+npm run secrets:check

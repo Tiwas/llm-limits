@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: transparent; /* Let React handle backgrounds */
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent; 
+}
+::-webkit-scrollbar-thumb {
+  background: #94a3b8; /* Slate-400 */
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b; /* Slate-500 */
+}
+
+body {
+    /* Removed global drag to fix context menu issues */
+    /* -webkit-app-region: drag; */
+}
+
+button, input, select, textarea, .no-drag {
+    -webkit-app-region: no-drag; 
+}

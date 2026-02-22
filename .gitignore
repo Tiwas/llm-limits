@@ -1,0 +1,33 @@
+# Dependencies and build outputs
+node_modules/
+out/
+dist/
+
+# Local project artifacts
+backups/
+logs/
+plans/
+*.log
+PowerToys_Paste_*.png
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+
+# AI/dev instruction files - must stay private
+AGENTS.md
+CLAUDE.md
+codex.md
+GEMINI.md
+robots.md
+PROJECT_POLICY.md
+PROJECT_OVERRIDES.md
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
