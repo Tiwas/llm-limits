@@ -71,25 +71,13 @@ Available settings include:
 - Auto-start on OS login
 - Debug logging
 
-## Security Notes
+## Contributing
 
-- This public repository intentionally excludes private development prompt/instruction files.
-- Do not commit secrets (API keys, certificates, `.env` values).
+Contributions are welcome.
 
-## Suggested Public Repo Workflow
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with clear commit messages
+4. Open a pull request with a short description and test notes
 
-If this folder is not already a git repo:
-
-```bash
-git init
-git add .
-git commit -m "feat: initial public-safe release"
-```
-
-Create a public GitHub repository, then:
-
-```bash
-git branch -M main
-git remote add origin https://github.com/<your-user>/<your-repo>.git
-git push -u origin main
-```
+Please use Issues for bug reports and feature requests.
