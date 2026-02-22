@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, session, net } from 'electron'
 import { join } from 'path'
+import { existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import store from './store'
 import { getClaudeWebUsage, getCodexUsage } from './services/usage'
@@ -267,11 +268,44 @@ function startClaudeLogin() {
     })
 }
 
+function createTrayIcon(): Electron.NativeImage {
+    const iconCandidates = [
+        join(process.cwd(), 'build/icons/app.ico'),
+        join(app.getAppPath(), 'build/icons/app.ico'),
+        join(process.resourcesPath, 'build/icons/app.ico'),
+        join(process.resourcesPath, 'app.asar', 'build/icons/app.ico')
+    ]
+
+    for (const candidate of iconCandidates) {
+        if (!existsSync(candidate)) continue
+        const iconFromPath = nativeImage.createFromPath(candidate).resize({ width: 16, height: 16 })
+        if (!iconFromPath.isEmpty()) return iconFromPath
+    }
+
+    const robotSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="14" y="18" width="36" height="30" rx="8" fill="#2563eb"/>
+  <circle cx="26" cy="33" r="4" fill="#e2e8f0"/>
+  <circle cx="38" cy="33" r="4" fill="#e2e8f0"/>
+  <rect x="24" y="41" width="16" height="3" rx="1.5" fill="#e2e8f0"/>
+  <rect x="30" y="9" width="4" height="10" rx="2" fill="#22c55e"/>
+  <circle cx="32" cy="8" r="3.5" fill="#22c55e"/>
+</svg>`
+
+    const iconFromSvg = nativeImage
+        .createFromDataURL(`data:image/svg+xml;charset=UTF-8,${encodeURIComponent(robotSvg)}`)
+        .resize({ width: 16, height: 16 })
+
+    if (!iconFromSvg.isEmpty()) return iconFromSvg
+
+    // Fallback if SVG parsing fails on a platform/runtime.
+    return nativeImage.createFromDataURL(
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAChJREFUOE9j/P8fCmBnwA4Y/4fC/6Hw/0g0I/z/Hwqj6UA0G4hmA9H8DwB01h/xWw631AAAAABJRU5ErkJggg=='
+    )
+}
+
 function createTray(): void {
-  // Simple 16x16 red square for visibility
-  const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAChJREFUOE9j/P8fCmBnwA4Y/4fC/6Hw/0g0I/z/Hwqj6UA0G4hmA9H8DwB01h/xWw631AAAAABJRU5ErkJggg=='
-  )
+  const icon = createTrayIcon()
   
   tray = new Tray(icon)
   const contextMenu = Menu.buildFromTemplate([
