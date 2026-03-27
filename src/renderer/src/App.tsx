@@ -312,7 +312,7 @@ function App(): JSX.Element {
             </button>
             <div className="flex flex-col items-center">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">Settings</h2>
-                <span className="text-[10px] text-slate-400 font-mono">v1.3.0 (Stable)</span>
+                <span className="text-[10px] text-slate-400 font-mono">v1.3.1 (Stable)</span>
             </div>
              <button onClick={handleClose} className="p-2 hover:bg-red-200 rounded-full text-slate-600 hover:text-red-700 transition-colors" title="Close App">
                 <X size={18} />
@@ -330,8 +330,8 @@ function App(): JSX.Element {
             <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wide block ml-1">Claude Code Integration</label>
                 <div className="flex space-x-2 mb-2">
-                    <button onClick={() => setSettings({...settings, anthropicMode: 'api'})} className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.anthropicMode === 'api' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>API Key</button>
-                    <button onClick={() => setSettings({...settings, anthropicMode: 'web'})} className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.anthropicMode === 'web' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Web Login</button>
+                    <button onClick={() => setSettings({...settings, anthropicMode: 'api'})} className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.anthropicMode === 'api' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>API Key</button>
+                    <button onClick={() => setSettings({...settings, anthropicMode: 'web'})} className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.anthropicMode === 'web' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>Web Login</button>
                 </div>
                 {settings.anthropicMode === 'api' ? (
                     <input type="password" value={settings.anthropicKey} onChange={(e) => setSettings({...settings, anthropicKey: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 placeholder-slate-400 shadow-sm transition-all" placeholder="sk-ant..." />
@@ -363,13 +363,13 @@ function App(): JSX.Element {
                 <div className="flex space-x-2">
                     <button
                       onClick={() => setSettings({ ...settings, timeFormat: '24h' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.timeFormat === '24h' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.timeFormat === '24h' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
                     >
                       24H
                     </button>
                     <button
                       onClick={() => setSettings({ ...settings, timeFormat: '12h' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.timeFormat === '12h' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.timeFormat === '12h' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
                     >
                       12H
                     </button>
@@ -380,13 +380,13 @@ function App(): JSX.Element {
                 <div className="flex space-x-2">
                     <button
                       onClick={() => setSettings({ ...settings, dateFormat: 'dd.mm.yyyy' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateFormat === 'dd.mm.yyyy' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateFormat === 'dd.mm.yyyy' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
                     >
                       DD.MM.YYYY
                     </button>
                     <button
                       onClick={() => setSettings({ ...settings, dateFormat: 'mm.dd.yyyy' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateFormat === 'mm.dd.yyyy' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateFormat === 'mm.dd.yyyy' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
                     >
                       MM.DD.YYYY
                     </button>
@@ -397,13 +397,13 @@ function App(): JSX.Element {
                 <div className="flex space-x-2">
                     <button
                       onClick={() => setSettings({ ...settings, dateSeparator: '.' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateSeparator === '.' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateSeparator === '.' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
                     >
                       .
                     </button>
                     <button
                       onClick={() => setSettings({ ...settings, dateSeparator: '/' })}
-                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateSeparator === '/' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.dateSeparator === '/' ? 'bg-slate-700 text-white border-slate-700 ring-2 ring-offset-1 ring-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
                     >
                       /
                     </button>

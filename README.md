@@ -13,6 +13,9 @@ A floating desktop monitor for AI quota usage (Codex/OpenAI, Claude, Gemini), bu
 - Settings auto-open on first run (or when provider config is missing)
 - Optional auto-start on OS login
 - Window position memory + snap-to-edge placements
+- Auto period-window warmup: sends a minimal query when the Codex period window expires to establish a new window immediately (API key and OAuth/CLI supported)
+- CLI path checker: test button in Settings to verify `codex` and `gcloud` are available in PATH
+- Active selection highlighted with a visible ring in Settings toggle groups
 
 ## Tech Stack
 
