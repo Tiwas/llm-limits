@@ -26,6 +26,7 @@ const api = {
     ipcRenderer.on('update-usage', subscription)
     return () => ipcRenderer.removeListener('update-usage', subscription)
   },
+  getLastCliStatus: () => ipcRenderer.invoke('get-last-cli-status'),
   checkCliPaths: () => ipcRenderer.invoke('check-cli-paths')
 }
 

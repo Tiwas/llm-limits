@@ -22,6 +22,7 @@ declare global {
       showContextMenu: () => void
       onLoginSuccess: (callback: (service: string) => void) => () => void
       onUpdateUsage: (callback: (data: any) => void) => () => void
+      getLastCliStatus: () => Promise<{ codex: boolean; gcloud: boolean; everRun: boolean }>
       checkCliPaths: () => Promise<{ codex: boolean; gcloud: boolean }>
     }
   }

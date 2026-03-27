@@ -22,6 +22,7 @@ function App(): JSX.Element {
   const [usageData, setUsageData] = useState<any>({ openai: null, gemini: null, anthropic: null })
   const [cliStatus, setCliStatus] = useState<{ codex: boolean; gcloud: boolean } | null>(null)
   const [checkingCli, setCheckingCli] = useState(false)
+  const [cliWarning, setCliWarning] = useState<string[]>([])
   const [settings, setSettings] = useState<any>({
       openaiKey: '', geminiKey: '', updateFrequency: 5, 
       anthropicMode: 'api', anthropicWebCookie: '', anthropicOrgId: '',
@@ -87,6 +88,21 @@ function App(): JSX.Element {
     if (!settingsLoaded) return
     if (view === 'settings') {
       window.api.resizeWindow(460, 820)
+      setCheckingCli(true)
+      setCliStatus(null)
+      setCliWarning([])
+      window.api.getLastCliStatus().then((last) => {
+        window.api.checkCliPaths().then((current) => {
+          setCliStatus(current)
+          setCheckingCli(false)
+          if (last.everRun) {
+            const regressed: string[] = []
+            if (last.codex && !current.codex) regressed.push('Codex')
+            if (last.gcloud && !current.gcloud) regressed.push('gcloud')
+            setCliWarning(regressed)
+          }
+        })
+      })
       return
     }
     // Always restore latest persisted monitor size when returning to monitor.
@@ -312,7 +328,7 @@ function App(): JSX.Element {
             </button>
             <div className="flex flex-col items-center">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">Settings</h2>
-                <span className="text-[10px] text-slate-400 font-mono">v1.3.1 (Stable)</span>
+                <span className="text-[10px] text-slate-400 font-mono">v1.3.2 (Stable)</span>
             </div>
              <button onClick={handleClose} className="p-2 hover:bg-red-200 rounded-full text-slate-600 hover:text-red-700 transition-colors" title="Close App">
                 <X size={18} />
@@ -412,6 +428,11 @@ function App(): JSX.Element {
                 
                             <div className="space-y-2 pt-2 border-t border-slate-300">
                                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wide block ml-1">CLI Tools</label>
+                                {cliWarning.length > 0 && (
+                                    <div className="bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 text-xs text-amber-800 font-medium">
+                                        ⚠ Previously found, now missing from PATH: {cliWarning.join(', ')}
+                                    </div>
+                                )}
                                 <button
                                     onClick={handleCheckCli}
                                     disabled={checkingCli}

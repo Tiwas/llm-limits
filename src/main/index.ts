@@ -482,6 +482,14 @@ app.whenReady().then(() => {
       startClaudeLogin()
   })
   
+  ipcMain.handle('get-last-cli-status', () => {
+      return {
+          codex: store.get('lastKnownCliCodex'),
+          gcloud: store.get('lastKnownCliGcloud'),
+          everRun: store.get('cliCheckEverRun')
+      }
+  })
+
   ipcMain.handle('check-cli-paths', async () => {
       const check = async (cmd: string): Promise<boolean> => {
           try {
@@ -495,6 +503,9 @@ app.whenReady().then(() => {
           check('codex --version'),
           check('gcloud --version')
       ])
+      store.set('lastKnownCliCodex', codex)
+      store.set('lastKnownCliGcloud', gcloud)
+      store.set('cliCheckEverRun', true)
       return { codex, gcloud }
   })
 

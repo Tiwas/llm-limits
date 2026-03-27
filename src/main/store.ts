@@ -18,7 +18,12 @@ interface StoreSchema {
   
   // Debug
   debugMode: boolean
-  
+
+  // CLI Status
+  lastKnownCliCodex: boolean
+  lastKnownCliGcloud: boolean
+  cliCheckEverRun: boolean
+
   // Window State
   monitorWidth: number
   monitorHeight: number
@@ -41,6 +46,9 @@ const store = new Store<StoreSchema>({
     anthropicWebCookie: '',
     anthropicOrgId: '',
     debugMode: false,
+    lastKnownCliCodex: false,
+    lastKnownCliGcloud: false,
+    cliCheckEverRun: false,
     monitorWidth: 300,
     monitorHeight: 150,
     monitorX: -1,
