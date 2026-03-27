@@ -312,7 +312,7 @@ function App(): JSX.Element {
             </button>
             <div className="flex flex-col items-center">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">Settings</h2>
-                <span className="text-[10px] text-slate-400 font-mono">v1.2.3 (Stable)</span>
+                <span className="text-[10px] text-slate-400 font-mono">v1.3.0 (Stable)</span>
             </div>
              <button onClick={handleClose} className="p-2 hover:bg-red-200 rounded-full text-slate-600 hover:text-red-700 transition-colors" title="Close App">
                 <X size={18} />
