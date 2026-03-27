@@ -1,4 +1,5 @@
 import { net } from 'electron'
+import { spawn } from 'child_process'
 import store from '../store'
 
 interface UsageData {
@@ -97,6 +98,109 @@ export async function getClaudeWebUsage(cookie: string, orgId: string): Promise<
         })
         
         request.end()
+    })
+}
+
+/**
+ * Sends a minimal chat completion request to register usage and initialize a new Codex period window.
+ * Only works with standard sk-* API keys; OAuth tokens are not supported.
+ *
+ * @param {string} apiKey - OpenAI API key (must start with 'sk-')
+ * @returns {Promise<boolean>} True if the warmup request returned HTTP 200, false otherwise
+ *
+ * Called by:
+ *   - pollUsage() in src/main/index.ts — when Codex secondary_window (period window) expiry is detected
+ *
+ * Calls:
+ *   - net.request() — fires a minimal gpt-4o-mini completion (max_tokens: 1) to open a new period window
+ */
+export async function triggerCodexPeriodWarmup(apiKey: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        const debug = store.get('debugMode')
+        if (debug) console.log('Triggering Codex period window warmup...')
+
+        const body = JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 1
+        })
+
+        const request = net.request({
+            method: 'POST',
+            url: 'https://api.openai.com/v1/chat/completions'
+        })
+
+        request.setHeader('Authorization', `Bearer ${apiKey}`)
+        request.setHeader('Content-Type', 'application/json')
+
+        request.on('response', (response) => {
+            if (debug) console.log(`Codex period warmup response status: ${response.statusCode}`)
+            response.on('data', () => {}) // drain response body
+            response.on('end', () => resolve(response.statusCode === 200))
+        })
+
+        request.on('error', (err) => {
+            console.error('Codex period warmup request error:', err)
+            resolve(false)
+        })
+
+        request.write(body)
+        request.end()
+    })
+}
+
+/**
+ * Triggers a new Codex period window for OAuth users by starting the Codex CLI
+ * with a minimal prompt and killing it after a short delay. The CLI sends the
+ * initial API request within the first second, which is enough to register usage
+ * and open a new secondary_window with a fresh reset_at.
+ *
+ * @returns {Promise<boolean>} True if the CLI process started successfully, false if codex was not found
+ *
+ * Called by:
+ *   - pollUsage() in src/main/index.ts — when Codex period window expiry is detected and no sk-* key is present
+ *
+ * Calls:
+ *   - spawn('codex') — starts the Codex CLI process, then kills it after 2 seconds
+ */
+export async function triggerCodexPeriodWarmupViaCLI(): Promise<boolean> {
+    return new Promise((resolve) => {
+        const debug = store.get('debugMode')
+        if (debug) console.log('Triggering Codex CLI period window warmup...')
+
+        let settled = false
+        const settle = (result: boolean) => {
+            if (!settled) {
+                settled = true
+                resolve(result)
+            }
+        }
+
+        const proc = spawn('codex', ['hi'], {
+            shell: true,
+            stdio: 'ignore'
+        })
+
+        proc.on('error', (err) => {
+            console.error('Codex CLI warmup: could not start process:', err.message)
+            settle(false)
+        })
+
+        proc.on('spawn', () => {
+            if (debug) console.log('Codex CLI warmup process started, will kill after 2s')
+        })
+
+        // Kill after 2 seconds — the initial API request fires within the first second
+        const killTimer = setTimeout(() => {
+            proc.kill()
+            if (debug) console.log('Codex CLI warmup process killed after timeout')
+            settle(true)
+        }, 2000)
+
+        proc.on('close', () => {
+            clearTimeout(killTimer)
+            settle(true)
+        })
     })
 }
 

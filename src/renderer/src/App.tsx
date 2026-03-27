@@ -20,6 +20,8 @@ function App(): JSX.Element {
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [viewport, setViewport] = useState(getViewportSize)
   const [usageData, setUsageData] = useState<any>({ openai: null, gemini: null, anthropic: null })
+  const [cliStatus, setCliStatus] = useState<{ codex: boolean; gcloud: boolean } | null>(null)
+  const [checkingCli, setCheckingCli] = useState(false)
   const [settings, setSettings] = useState<any>({
       openaiKey: '', geminiKey: '', updateFrequency: 5, 
       anthropicMode: 'api', anthropicWebCookie: '', anthropicOrgId: '',
@@ -96,6 +98,14 @@ function App(): JSX.Element {
   const handleClose = () => window.api.closeApp()
   const handleBack = () => setView('monitor')
   const handleClaudeLogin = () => window.api.loginClaude()
+
+  const handleCheckCli = async () => {
+      setCheckingCli(true)
+      setCliStatus(null)
+      const result = await window.api.checkCliPaths()
+      setCliStatus(result)
+      setCheckingCli(false)
+  }
   
   const saveConfig = () => {
       const parsedFrequency = Number.parseInt(String(settings.updateFrequency), 10)
@@ -400,6 +410,27 @@ function App(): JSX.Element {
                 </div>
             </div>
                 
+                            <div className="space-y-2 pt-2 border-t border-slate-300">
+                                <label className="text-xs font-bold text-slate-600 uppercase tracking-wide block ml-1">CLI Tools</label>
+                                <button
+                                    onClick={handleCheckCli}
+                                    disabled={checkingCli}
+                                    className="w-full bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-bold py-2 rounded-lg transition-colors disabled:opacity-50"
+                                >
+                                    {checkingCli ? 'Checking...' : 'Test CLI Tools in PATH'}
+                                </button>
+                                {cliStatus && (
+                                    <div className="flex space-x-2">
+                                        <div className={`flex-1 text-center text-xs font-bold py-1.5 rounded border ${cliStatus.codex ? 'bg-green-50 border-green-300 text-green-700' : 'bg-red-50 border-red-300 text-red-600'}`}>
+                                            Codex {cliStatus.codex ? '✓' : '✗'}
+                                        </div>
+                                        <div className={`flex-1 text-center text-xs font-bold py-1.5 rounded border ${cliStatus.gcloud ? 'bg-green-50 border-green-300 text-green-700' : 'bg-red-50 border-red-300 text-red-600'}`}>
+                                            gcloud {cliStatus.gcloud ? '✓' : '✗'}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="flex items-center space-x-2 pt-2 border-t border-slate-300">
                                 <input 
                                     type="checkbox" 

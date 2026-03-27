@@ -25,7 +25,8 @@ const api = {
     const subscription = (_: any, data: any) => callback(data)
     ipcRenderer.on('update-usage', subscription)
     return () => ipcRenderer.removeListener('update-usage', subscription)
-  }
+  },
+  checkCliPaths: () => ipcRenderer.invoke('check-cli-paths')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

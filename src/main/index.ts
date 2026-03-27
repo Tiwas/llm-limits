@@ -1,15 +1,21 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, session, net } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
+import { exec } from 'child_process'
+import { promisify } from 'util'
+
+const execAsync = promisify(exec)
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import store from './store'
-import { getClaudeWebUsage, getCodexUsage } from './services/usage'
+import { getClaudeWebUsage, getCodexUsage, triggerCodexPeriodWarmup, triggerCodexPeriodWarmupViaCLI } from './services/usage'
 import { getGcloudGeminiUsage } from './services/gcloud'
 
 let tray: Tray | null = null
 let mainWindow: BrowserWindow | null = null
 let pollingInterval: NodeJS.Timeout | null = null
 let activeView: 'monitor' | 'settings' = 'monitor'
+// Tracks the last Codex periodResetAt we triggered a warmup for, to avoid repeated triggers.
+let lastCodexWarmupPeriod: string | null = null
 
 type SnapPosition =
     | 'top-left'
@@ -179,6 +185,28 @@ async function pollUsage() {
             }
         } catch (e) {
             console.error('Error polling Gemini via gcloud:', e)
+        }
+    }
+
+    // --- Codex period window warmup ---
+    // When the secondary_window (period window) has expired, fire a minimal query
+    // to register usage and open a new period window with a fresh reset_at.
+    // Only triggered once per expired period and only for sk-* API keys.
+    const codexPeriodResetAt = data.openai?.periodResetAt as string | null | undefined
+    if (codexPeriodResetAt && new Date(codexPeriodResetAt).getTime() < Date.now() && codexPeriodResetAt !== lastCodexWarmupPeriod) {
+        lastCodexWarmupPeriod = codexPeriodResetAt
+        const openaiKey = String(store.get('openaiKey') || '')
+        if (openaiKey.startsWith('sk-')) {
+            if (debug) console.log('Codex period window expired, triggering API warmup...')
+            triggerCodexPeriodWarmup(openaiKey).then((success) => {
+                if (debug) console.log(`Codex period API warmup ${success ? 'succeeded' : 'failed'}`)
+            })
+        } else {
+            // OAuth token (or local CLI token) — run the Codex CLI briefly instead
+            if (debug) console.log('Codex period window expired, triggering CLI warmup...')
+            triggerCodexPeriodWarmupViaCLI().then((success) => {
+                if (debug) console.log(`Codex period CLI warmup ${success ? 'succeeded' : 'failed'}`)
+            })
         }
     }
 
@@ -454,6 +482,22 @@ app.whenReady().then(() => {
       startClaudeLogin()
   })
   
+  ipcMain.handle('check-cli-paths', async () => {
+      const check = async (cmd: string): Promise<boolean> => {
+          try {
+              await execAsync(cmd, { timeout: 3000 })
+              return true
+          } catch {
+              return false
+          }
+      }
+      const [codex, gcloud] = await Promise.all([
+          check('codex --version'),
+          check('gcloud --version')
+      ])
+      return { codex, gcloud }
+  })
+
   ipcMain.on('show-context-menu', () => {
       const menu = Menu.buildFromTemplate([
           { label: 'Settings', click: () => mainWindow?.webContents.send('switch-view', 'settings') },
