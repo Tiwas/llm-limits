@@ -88,6 +88,7 @@ interface RateLimitSnapshot {
 
 interface RateLimitsReadResult {
   ordinaryUsageAllowed?: unknown
+  rateLimits?: RateLimitSnapshot | null
   rateLimitsByLimitId?: Record<string, RateLimitSnapshot | undefined> | null
   rateLimitResetCredits?: {
     availableCount?: unknown
@@ -105,6 +106,16 @@ interface LoginCompletedNotification {
   loginId?: unknown
   success?: unknown
   error?: unknown
+}
+
+/**
+ * Identifies errors returned by a valid Codex JSON-RPC response.
+ */
+class CodexRpcRequestError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CodexRpcRequestError'
+  }
 }
 
 const REMOTE_HOST = 'devserver'
@@ -135,6 +146,7 @@ function sanitizeErrorMessage(error: unknown): string {
  * @returns {boolean} True when reauthentication is the appropriate user action.
  */
 function isAuthenticationError(error: unknown): boolean {
+  if (!(error instanceof CodexRpcRequestError)) return false
   return /auth|credential|expired|forbidden|login|token|unauthori[sz]ed|\b401\b|\b403\b/i.test(
     sanitizeErrorMessage(error)
   )
@@ -168,15 +180,17 @@ function normalizeResetAt(value: unknown): string | null {
  * Selects the primary Codex quota snapshot from a multi-limit response.
  *
  * @param {RateLimitsReadResult['rateLimitsByLimitId']} limits - Limits keyed by backend limit ID.
+ * @param {RateLimitSnapshot | null | undefined} fallback - Backward-compatible single snapshot.
  * @returns {RateLimitSnapshot | null} Main Codex snapshot when present.
  */
 function selectCodexSnapshot(
-  limits: RateLimitsReadResult['rateLimitsByLimitId']
+  limits: RateLimitsReadResult['rateLimitsByLimitId'],
+  fallback: RateLimitSnapshot | null | undefined
 ): RateLimitSnapshot | null {
-  if (!limits || typeof limits !== 'object') return null
+  if (!limits || typeof limits !== 'object') return fallback ?? null
   if (limits.codex) return limits.codex
   const snapshots = Object.values(limits).filter((value): value is RateLimitSnapshot => Boolean(value))
-  return snapshots.find((snapshot) => snapshot.limitName == null) ?? snapshots[0] ?? null
+  return snapshots.find((snapshot) => snapshot.limitName == null) ?? snapshots[0] ?? fallback ?? null
 }
 
 /**
@@ -317,7 +331,7 @@ class CodexRpcSession {
    */
   close(): void {
     if (this.closed) return
-    this.closed = true
+    this.fail(new Error('Remote Codex session closed'))
     this.child?.stdin.end()
     this.child?.kill()
   }
@@ -341,6 +355,7 @@ class CodexRpcSession {
     this.child.stderr.on('data', (chunk: string) => {
       this.stderrBuffer = `${this.stderrBuffer}${chunk}`.slice(-2_000)
     })
+    this.child.stdin.on('error', (error) => this.handleTransportError(error))
     this.child.on('close', (code) => this.handleClose(code))
 
     return new Promise((resolve, reject) => {
@@ -394,7 +409,7 @@ class CodexRpcSession {
       clearTimeout(pending.timer)
       this.pending.delete(message.id)
       if (message.error) {
-        pending.reject(new Error(message.error.message || 'Remote Codex request failed'))
+        pending.reject(new CodexRpcRequestError(message.error.message || 'Remote Codex request failed'))
       } else {
         pending.resolve(message.result)
       }
@@ -418,16 +433,36 @@ class CodexRpcSession {
       detail === 'Unknown error' ? `Remote Codex session closed with code ${code ?? 'unknown'}` : detail
     )
 
+    this.fail(error)
+  }
+
+  /**
+   * Converts SSH stream errors such as EPIPE into an ordinary unavailable-account result.
+   *
+   * @param {Error} error - Error emitted by the SSH stdin stream.
+   * @returns {void}
+   */
+  private handleTransportError(error: Error): void {
+    this.fail(new Error(sanitizeErrorMessage(error)))
+    this.child?.kill()
+  }
+
+  /**
+   * Rejects pending requests and notifies listeners exactly once for a failed session.
+   *
+   * @param {Error} error - Sanitized session failure.
+   * @returns {void}
+   */
+  private fail(error: Error): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
       pending.reject(error)
     }
     this.pending.clear()
 
-    if (!this.closed) {
-      this.closed = true
-      for (const listener of this.closeListeners) listener(error)
-    }
+    if (this.closed) return
+    this.closed = true
+    for (const listener of this.closeListeners) listener(error)
   }
 }
 
@@ -450,9 +485,7 @@ async function readRemoteAccount(profile: RemoteProfile): Promise<CodexRemoteAcc
 
     let rateLimits: RateLimitsReadResult
     try {
-      rateLimits = await session.request<RateLimitsReadResult>('account/rateLimits/read', {
-        excludeResetCreditDetails: true
-      })
+      rateLimits = await session.request<RateLimitsReadResult>('account/rateLimits/read')
     } catch (error) {
       const status = isAuthenticationError(error) ? 'authentication-required' : 'unavailable'
       const failure = createFailureResult(profile, status, sanitizeErrorMessage(error))
@@ -461,7 +494,7 @@ async function readRemoteAccount(profile: RemoteProfile): Promise<CodexRemoteAcc
       return failure
     }
 
-    const snapshot = selectCodexSnapshot(rateLimits.rateLimitsByLimitId)
+    const snapshot = selectCodexSnapshot(rateLimits.rateLimitsByLimitId, rateLimits.rateLimits)
     const windows = snapshot ? selectDisplayWindows(snapshot) : null
     if (!windows) {
       const failure = createFailureResult(profile, 'unavailable', 'Quota data is unavailable')

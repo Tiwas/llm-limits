@@ -17,7 +17,7 @@ Provider credentials remain in their source environment. The renderer receives n
 Each background poll performs:
 
 1. `account/read` with `refreshToken: false` to read non-secret identity metadata.
-2. `account/rateLimits/read` with reset-credit details excluded while retaining `availableCount`.
+2. `account/rateLimits/read`, retaining only the reset-credit `availableCount` and discarding any detail rows.
 3. Normalization of the shorter and longer rate-limit windows into session and period display fields.
 4. Immediate closure of the SSH/app-server session.
 
