@@ -248,7 +248,12 @@ function App(): JSX.Element {
           usageData.openai?.source === 'devserver' && Array.isArray(usageData.openai.accounts)
             ? usageData.openai.accounts
             : null
-      const codexProviders = remoteCodexAccounts
+      const localCodexFallback = usageData.openai?.source === 'devserver'
+        ? usageData.openai.localFallback
+        : usageData.openai
+      const showLocalCodexFallback =
+        remoteCodexAccounts?.every((account: any) => account.status === 'unavailable') && localCodexFallback
+      const codexProviders = remoteCodexAccounts && !showLocalCodexFallback
         ? remoteCodexAccounts.map((account: any) => ({
             key: `openai-${account.id}`,
             label: `Codex ${account.label}`,
@@ -264,10 +269,10 @@ function App(): JSX.Element {
             key: 'openai',
             label: 'Codex',
             shortLabel: 'Codex',
-            data: usageData.openai,
+            data: localCodexFallback,
             icon: openaiSimpleIcon,
             color: '#10a37f',
-            status: usageData.openai ? 'connected' : null,
+            status: localCodexFallback ? 'connected' : null,
             resetCredits: null,
             detail: 'Local Windows Codex'
           }]
