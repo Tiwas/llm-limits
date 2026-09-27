@@ -5,6 +5,9 @@ A floating desktop monitor for AI quota usage (Codex/OpenAI, Claude, Gemini), bu
 ## Features
 
 - Always-on-top compact monitor window
+- Parallel Codex quota monitoring for account A and B stored on `devserver`
+- Available Codex rate-limit reset credits shown as `+N`
+- Device-code reauthentication for either devserver Codex account
 - Session/period quota toggle in the monitor
 - Reset timestamp display with configurable:
   - 12H / 24H time
@@ -29,6 +32,7 @@ A floating desktop monitor for AI quota usage (Codex/OpenAI, Claude, Gemini), bu
 - Node.js 20+
 - npm
 - Windows recommended for packaging (`.exe`)
+- Windows OpenSSH client with a working `devserver` SSH alias for remote Codex account monitoring
 
 ## Install
 
@@ -65,8 +69,8 @@ Open **Settings** from the app context menu/tray.
 Available settings include:
 
 - Provider credentials/configuration
-  - Codex/OpenAI
-  - Claude (API or web-login integration)
+  - Codex/OpenAI account A and B on `devserver`, with optional local API-key fallback
+  - Claude (API or web-login integration on Windows)
   - Gemini
 - Update frequency (minutes)
 - Time format (24H/12H)
