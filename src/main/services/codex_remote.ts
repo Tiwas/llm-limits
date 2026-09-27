@@ -557,7 +557,12 @@ export async function beginDevserverCodexLogin(
 ): Promise<CodexRemoteLoginHandle> {
   const profile = REMOTE_PROFILES[accountId]
   const session = new CodexRpcSession(profile)
-  await session.initialize()
+  try {
+    await session.initialize()
+  } catch (error) {
+    session.close()
+    throw error
+  }
 
   let activeLoginId = ''
   let settled = false

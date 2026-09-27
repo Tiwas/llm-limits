@@ -19,8 +19,9 @@ import {
 let tray: Tray | null = null
 let mainWindow: BrowserWindow | null = null
 let pollingInterval: NodeJS.Timeout | null = null
+let pollingGeneration = 0
 let activeView: 'monitor' | 'settings' = 'monitor'
-const activeCodexLogins = new Map<CodexRemoteAccountId, CodexRemoteLoginHandle>()
+const activeCodexLogins = new Map<CodexRemoteAccountId, Promise<CodexRemoteLoginHandle>>()
 // Tracks the last Codex periodResetAt we triggered a warmup for, to avoid repeated triggers.
 let lastCodexWarmupPeriod: string | null = null
 
@@ -142,9 +143,10 @@ async function fetchClaudeOrgId(cookie: string): Promise<string | null> {
 /**
  * Polls all enabled providers and publishes a normalized usage snapshot to the renderer.
  *
- * @returns {Promise<void>} Resolves after the current polling cycle is sent.
+ * @param {number} generation - Polling generation used to discard stale in-flight results.
+ * @returns {Promise<void>} Resolves after the current polling cycle is sent or discarded.
  */
-async function pollUsage(): Promise<void> {
+async function pollUsage(generation = pollingGeneration): Promise<void> {
     const debug = store.get('debugMode')
     if (debug) console.log('Polling usage...')
     
@@ -225,6 +227,8 @@ async function pollUsage(): Promise<void> {
         }
     }
 
+    if (generation !== pollingGeneration) return
+
     // --- Codex period window warmup ---
     // When the secondary_window (period window) has expired, fire a minimal query
     // to register usage and open a new period window with a fresh reset_at.
@@ -253,9 +257,13 @@ async function pollUsage(): Promise<void> {
 
 function startPolling() {
     if (pollingInterval) clearInterval(pollingInterval)
+    pollingGeneration += 1
+    const generation = pollingGeneration
     const frequency = resolveUpdateFrequency(store.get('updateFrequency'))
-    pollingInterval = setInterval(pollUsage, frequency * 60 * 1000)
-    pollUsage() // Initial fetch
+    pollingInterval = setInterval(() => {
+        void pollUsage(generation)
+    }, frequency * 60 * 1000)
+    void pollUsage(generation) // Initial fetch
 }
 
 function createSnapSubmenu() {
@@ -366,27 +374,40 @@ async function startCodexReauthentication(
     accountId: CodexRemoteAccountId
 ): Promise<CodexRemoteLoginHandle['challenge']> {
     const existing = activeCodexLogins.get(accountId)
-    if (existing) return existing.challenge
+    if (existing) return (await existing).challenge
 
-    const handle = await beginDevserverCodexLogin(accountId)
-    activeCodexLogins.set(accountId, handle)
-
-    handle.completion
-        .then(async (result) => {
-            activeCodexLogins.delete(accountId)
-            mainWindow?.webContents.send('codex-auth-update', result)
-            if (result.success) await pollUsage()
+    let loginPromise: Promise<CodexRemoteLoginHandle>
+    loginPromise = beginDevserverCodexLogin(accountId)
+        .then((handle) => {
+            handle.completion
+                .then(async (result) => {
+                    if (activeCodexLogins.get(accountId) === loginPromise) {
+                        activeCodexLogins.delete(accountId)
+                    }
+                    mainWindow?.webContents.send('codex-auth-update', result)
+                    if (result.success) await pollUsage()
+                })
+                .catch((error) => {
+                    if (activeCodexLogins.get(accountId) === loginPromise) {
+                        activeCodexLogins.delete(accountId)
+                    }
+                    mainWindow?.webContents.send('codex-auth-update', {
+                        accountId,
+                        success: false,
+                        error: error instanceof Error ? error.message : 'Authentication failed'
+                    })
+                })
+            return handle
         })
         .catch((error) => {
-            activeCodexLogins.delete(accountId)
-            mainWindow?.webContents.send('codex-auth-update', {
-                accountId,
-                success: false,
-                error: error instanceof Error ? error.message : 'Authentication failed'
-            })
+            if (activeCodexLogins.get(accountId) === loginPromise) {
+                activeCodexLogins.delete(accountId)
+            }
+            throw error
         })
 
-    return handle.challenge
+    activeCodexLogins.set(accountId, loginPromise)
+    return (await loginPromise).challenge
 }
 
 function createTrayIcon(): Electron.NativeImage {
@@ -640,6 +661,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  for (const login of activeCodexLogins.values()) login.cancel()
+  for (const login of activeCodexLogins.values()) {
+    void login.then((handle) => handle.cancel()).catch(() => {})
+  }
   activeCodexLogins.clear()
 })
