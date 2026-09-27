@@ -15,6 +15,9 @@ const api = {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
   loginClaude: () => ipcRenderer.invoke('login-claude'),
+  reauthenticateCodexAccount: (accountId: 'a' | 'b') =>
+    ipcRenderer.invoke('reauthenticate-codex-account', accountId),
+  openCodexAuthUrl: (url: string) => ipcRenderer.invoke('open-codex-auth-url', url),
   showContextMenu: () => ipcRenderer.send('show-context-menu'),
   onLoginSuccess: (callback: (service: string) => void) => {
     const subscription = (_: any, service: string) => callback(service)
@@ -25,6 +28,11 @@ const api = {
     const subscription = (_: any, data: any) => callback(data)
     ipcRenderer.on('update-usage', subscription)
     return () => ipcRenderer.removeListener('update-usage', subscription)
+  },
+  onCodexAuthUpdate: (callback: (result: any) => void) => {
+    const subscription = (_: any, result: any) => callback(result)
+    ipcRenderer.on('codex-auth-update', subscription)
+    return () => ipcRenderer.removeListener('codex-auth-update', subscription)
   },
   getLastCliStatus: () => ipcRenderer.invoke('get-last-cli-status'),
   checkCliPaths: () => ipcRenderer.invoke('check-cli-paths')

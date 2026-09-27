@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, session, net } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, session, net, shell } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { exec } from 'child_process'
@@ -9,11 +9,19 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import store from './store'
 import { getClaudeWebUsage, getCodexUsage, triggerCodexPeriodWarmup, triggerCodexPeriodWarmupViaCLI } from './services/usage'
 import { getGcloudGeminiUsage } from './services/gcloud'
+import {
+  beginDevserverCodexLogin,
+  getDevserverCodexUsage,
+  type CodexRemoteAccountId,
+  type CodexRemoteLoginHandle
+} from './services/codex_remote'
 
 let tray: Tray | null = null
 let mainWindow: BrowserWindow | null = null
 let pollingInterval: NodeJS.Timeout | null = null
+let pollingGeneration = 0
 let activeView: 'monitor' | 'settings' = 'monitor'
+const activeCodexLogins = new Map<CodexRemoteAccountId, Promise<CodexRemoteLoginHandle>>()
 // Tracks the last Codex periodResetAt we triggered a warmup for, to avoid repeated triggers.
 let lastCodexWarmupPeriod: string | null = null
 
@@ -34,13 +42,19 @@ function resolveUpdateFrequency(value: unknown): number {
     return parsed
 }
 
+/**
+ * Checks whether startup can use at least one configured provider source.
+ *
+ * @returns {boolean} True when remote Codex or another provider is configured.
+ */
 function hasAnyConfiguredProvider(): boolean {
+    const codexRemoteEnabled = store.get('codexRemoteEnabled') !== false
     const openaiKey = String(store.get('openaiKey') || '').trim()
     const geminiKey = String(store.get('geminiKey') || '').trim()
     const anthropicKey = String(store.get('anthropicKey') || '').trim()
     const anthropicCookie = String(store.get('anthropicWebCookie') || '').trim()
     const anthropicOrgId = String(store.get('anthropicOrgId') || '').trim()
-    return Boolean(openaiKey || geminiKey || anthropicKey || (anthropicCookie && anthropicOrgId))
+    return Boolean(codexRemoteEnabled || openaiKey || geminiKey || anthropicKey || (anthropicCookie && anthropicOrgId))
 }
 
 function shouldAutoOpenSettings(): boolean {
@@ -60,6 +74,27 @@ function applyAutoStartSetting(): void {
     if (process.platform === 'darwin') {
         app.setLoginItemSettings({ openAtLogin })
     }
+}
+
+/**
+ * Fetches the existing Windows Codex source for use when remote monitoring is disabled or unavailable.
+ *
+ * @param {boolean} debug - Whether diagnostic status messages are enabled.
+ * @returns {Promise<any | null>} Existing local Codex usage shape or null on failure.
+ */
+async function getLocalCodexUsage(debug: boolean): Promise<any | null> {
+    const openaiKey = store.get('openaiKey')
+    if (debug) console.log(`Checking local Codex key: ${openaiKey ? 'Present' : 'Missing (will try local CLI)'}`)
+
+    try {
+        const usage = await getCodexUsage(openaiKey || undefined)
+        if (usage) return usage
+        if (!openaiKey) return { percent: 45, used: 450, limit: 1000 }
+    } catch (error) {
+        console.error('Error polling local Codex:', error)
+    }
+
+    return null
 }
 
 // Helper to fetch Organization ID using the captured cookie
@@ -105,7 +140,13 @@ async function fetchClaudeOrgId(cookie: string): Promise<string | null> {
     })
 }
 
-async function pollUsage() {
+/**
+ * Polls all enabled providers and publishes a normalized usage snapshot to the renderer.
+ *
+ * @param {number} generation - Polling generation used to discard stale in-flight results.
+ * @returns {Promise<void>} Resolves after the current polling cycle is sent or discarded.
+ */
+async function pollUsage(generation = pollingGeneration): Promise<void> {
     const debug = store.get('debugMode')
     if (debug) console.log('Polling usage...')
     
@@ -139,26 +180,24 @@ async function pollUsage() {
     }
 
     // --- Codex / OpenAI ---
-    const openaiKey = store.get('openaiKey')
-    if (debug) console.log(`Checking Codex Key: ${openaiKey ? 'Present' : 'Missing (Will try local)'}`)
-    
-    // Always try to fetch, let the service handle fallback to local token
-    try {
-         if (debug) console.log('Fetching Codex usage...')
-         // Pass undefined if key is missing, so service looks for local token
-         const usage = await getCodexUsage(openaiKey || undefined)
-         if (usage) {
-             if (debug) console.log('Codex usage fetched successfully:', usage)
-             data.openai = usage
-         } else {
-             if (debug) console.log('Codex usage returned null')
-             // Only use mock if both API key AND local token failed
-             if (!openaiKey) {
-                 data.openai = { percent: 45, used: 450, limit: 1000 }
-             }
-         }
-    } catch (e) {
-        console.error('Error polling Codex:', e)
+    if (store.get('codexRemoteEnabled') !== false) {
+        try {
+            const remoteUsage = await getDevserverCodexUsage()
+            const remoteAvailable = remoteUsage.accounts.some((account) => account.status !== 'unavailable')
+            const localFallback = remoteAvailable ? null : await getLocalCodexUsage(Boolean(debug))
+            data.openai = { ...remoteUsage, localFallback }
+            if (debug) {
+                console.log(
+                    'Devserver Codex account states:',
+                    remoteUsage.accounts.map((account) => `${account.id}:${account.status}`).join(', ')
+                )
+            }
+        } catch (error) {
+            console.error('Error polling Codex accounts on devserver:', error)
+            data.openai = await getLocalCodexUsage(Boolean(debug))
+        }
+    } else {
+        data.openai = await getLocalCodexUsage(Boolean(debug))
     }
 
     // --- Gemini ---
@@ -188,11 +227,14 @@ async function pollUsage() {
         }
     }
 
+    if (generation !== pollingGeneration) return
+
     // --- Codex period window warmup ---
     // When the secondary_window (period window) has expired, fire a minimal query
     // to register usage and open a new period window with a fresh reset_at.
     // Only triggered once per expired period and only for sk-* API keys.
-    const codexPeriodResetAt = data.openai?.periodResetAt as string | null | undefined
+    const localCodexUsage = data.openai?.source === 'devserver' ? data.openai.localFallback : data.openai
+    const codexPeriodResetAt = localCodexUsage?.periodResetAt as string | null | undefined
     if (codexPeriodResetAt && new Date(codexPeriodResetAt).getTime() < Date.now() && codexPeriodResetAt !== lastCodexWarmupPeriod) {
         lastCodexWarmupPeriod = codexPeriodResetAt
         const openaiKey = String(store.get('openaiKey') || '')
@@ -215,9 +257,13 @@ async function pollUsage() {
 
 function startPolling() {
     if (pollingInterval) clearInterval(pollingInterval)
+    pollingGeneration += 1
+    const generation = pollingGeneration
     const frequency = resolveUpdateFrequency(store.get('updateFrequency'))
-    pollingInterval = setInterval(pollUsage, frequency * 60 * 1000)
-    pollUsage() // Initial fetch
+    pollingInterval = setInterval(() => {
+        void pollUsage(generation)
+    }, frequency * 60 * 1000)
+    void pollUsage(generation) // Initial fetch
 }
 
 function createSnapSubmenu() {
@@ -294,6 +340,74 @@ function startClaudeLogin() {
             }
         }
     })
+}
+
+/**
+ * Restricts external authentication links to trusted HTTPS OpenAI domains.
+ *
+ * @param {unknown} value - URL received from the Codex app-server.
+ * @returns {value is string} True when the URL is safe to open externally.
+ */
+function isAllowedCodexAuthUrl(value: unknown): value is string {
+    if (typeof value !== 'string') return false
+    try {
+        const url = new URL(value)
+        const hostname = url.hostname.toLowerCase()
+        const trustedHost =
+            hostname === 'openai.com' ||
+            hostname.endsWith('.openai.com') ||
+            hostname === 'chatgpt.com' ||
+            hostname.endsWith('.chatgpt.com')
+        return url.protocol === 'https:' && trustedHost
+    } catch {
+        return false
+    }
+}
+
+/**
+ * Starts or returns the active device-code login flow for one devserver account.
+ *
+ * @param {CodexRemoteAccountId} accountId - Fixed account A or B identifier.
+ * @returns {Promise<CodexRemoteLoginHandle['challenge']>} Device-code challenge shown by the renderer.
+ */
+async function startCodexReauthentication(
+    accountId: CodexRemoteAccountId
+): Promise<CodexRemoteLoginHandle['challenge']> {
+    const existing = activeCodexLogins.get(accountId)
+    if (existing) return (await existing).challenge
+
+    let loginPromise: Promise<CodexRemoteLoginHandle>
+    loginPromise = beginDevserverCodexLogin(accountId)
+        .then((handle) => {
+            handle.completion
+                .then(async (result) => {
+                    if (activeCodexLogins.get(accountId) === loginPromise) {
+                        activeCodexLogins.delete(accountId)
+                    }
+                    mainWindow?.webContents.send('codex-auth-update', result)
+                    if (result.success) await pollUsage()
+                })
+                .catch((error) => {
+                    if (activeCodexLogins.get(accountId) === loginPromise) {
+                        activeCodexLogins.delete(accountId)
+                    }
+                    mainWindow?.webContents.send('codex-auth-update', {
+                        accountId,
+                        success: false,
+                        error: error instanceof Error ? error.message : 'Authentication failed'
+                    })
+                })
+            return handle
+        })
+        .catch((error) => {
+            if (activeCodexLogins.get(accountId) === loginPromise) {
+                activeCodexLogins.delete(accountId)
+            }
+            throw error
+        })
+
+    activeCodexLogins.set(accountId, loginPromise)
+    return (await loginPromise).challenge
 }
 
 function createTrayIcon(): Electron.NativeImage {
@@ -481,6 +595,21 @@ app.whenReady().then(() => {
   ipcMain.handle('login-claude', () => {
       startClaudeLogin()
   })
+
+  ipcMain.handle('reauthenticate-codex-account', async (_, accountId: unknown) => {
+      if (accountId !== 'a' && accountId !== 'b') {
+          throw new Error('Unknown Codex account')
+      }
+      return startCodexReauthentication(accountId)
+  })
+
+  ipcMain.handle('open-codex-auth-url', async (_, url: unknown) => {
+      if (!isAllowedCodexAuthUrl(url)) {
+          throw new Error('Blocked untrusted authentication URL')
+      }
+      await shell.openExternal(url)
+      return true
+  })
   
   ipcMain.handle('get-last-cli-status', () => {
       return {
@@ -529,4 +658,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  for (const login of activeCodexLogins.values()) {
+    void login.then((handle) => handle.cancel()).catch(() => {})
+  }
+  activeCodexLogins.clear()
 })

@@ -2,6 +2,7 @@ import Store from 'electron-store'
 
 interface StoreSchema {
   openaiKey: string
+  codexRemoteEnabled: boolean
   geminiKey: string
   anthropicKey: string
   updateFrequency: number
@@ -34,6 +35,7 @@ interface StoreSchema {
 const store = new Store<StoreSchema>({
   defaults: {
     openaiKey: '',
+    codexRemoteEnabled: true,
     geminiKey: '',
     anthropicKey: '',
     updateFrequency: 5,

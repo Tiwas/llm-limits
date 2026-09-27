@@ -1,11 +1,20 @@
-import { useState, useEffect } from 'react'
-import { X, ArrowLeft } from 'lucide-react'
+import { useState, useEffect, type JSX } from 'react'
+import { X, ArrowLeft, ExternalLink, RefreshCw } from 'lucide-react'
 import openaiSimpleIcon from './assets/icons/openai-simple.svg'
 import claudeSimpleIcon from './assets/icons/claude-simple.svg'
 import geminiSimpleIcon from './assets/icons/gemini-simple.svg'
 
 const BASE_MONITOR_WIDTH = 300
 const BASE_MONITOR_HEIGHT = 150
+
+type CodexAccountId = 'a' | 'b'
+
+interface CodexAuthFlowState {
+  status: 'starting' | 'awaiting' | 'success' | 'error'
+  verificationUrl?: string
+  userCode?: string
+  error?: string
+}
 
 function getViewportSize(): { width: number; height: number } {
   return {
@@ -14,6 +23,11 @@ function getViewportSize(): { width: number; height: number } {
   }
 }
 
+/**
+ * Renders the floating quota monitor and its provider settings view.
+ *
+ * @returns {JSX.Element} Current monitor or settings UI.
+ */
 function App(): JSX.Element {
   const [view, setView] = useState<'monitor' | 'settings'>('monitor')
   const [quotaMode, setQuotaMode] = useState<'session' | 'period'>('session')
@@ -23,8 +37,12 @@ function App(): JSX.Element {
   const [cliStatus, setCliStatus] = useState<{ codex: boolean; gcloud: boolean } | null>(null)
   const [checkingCli, setCheckingCli] = useState(false)
   const [cliWarning, setCliWarning] = useState<string[]>([])
+  const [codexAuthFlows, setCodexAuthFlows] = useState<Record<CodexAccountId, CodexAuthFlowState | null>>({
+      a: null,
+      b: null
+  })
   const [settings, setSettings] = useState<any>({
-      openaiKey: '', geminiKey: '', updateFrequency: 5, 
+      openaiKey: '', codexRemoteEnabled: true, geminiKey: '', updateFrequency: 5,
       anthropicMode: 'api', anthropicWebCookie: '', anthropicOrgId: '',
       monitorWidth: 300, monitorHeight: 150, timeFormat: '24h',
       dateFormat: 'dd.mm.yyyy', dateSeparator: '.', autoStart: false
@@ -35,7 +53,8 @@ function App(): JSX.Element {
       timeFormat: raw?.timeFormat === '12h' ? '12h' : '24h',
       dateFormat: raw?.dateFormat === 'mm.dd.yyyy' ? 'mm.dd.yyyy' : 'dd.mm.yyyy',
       dateSeparator: raw?.dateSeparator === '/' ? '/' : '.',
-      autoStart: Boolean(raw?.autoStart)
+      autoStart: Boolean(raw?.autoStart),
+      codexRemoteEnabled: raw?.codexRemoteEnabled !== false
   })
 
   useEffect(() => {
@@ -56,6 +75,14 @@ function App(): JSX.Element {
             alert('Successfully logged in to Claude!')
         }
     })
+    const cleanupCodexAuth = window.api.onCodexAuthUpdate((result) => {
+        setCodexAuthFlows((current) => ({
+            ...current,
+            [result.accountId]: result.success
+              ? { status: 'success' }
+              : { status: 'error', error: result.error || 'Authentication failed' }
+        }))
+    })
     
     // Global Context Menu Listener (Backup for drag regions)
     const handleRightClick = (e: MouseEvent) => {
@@ -73,6 +100,7 @@ function App(): JSX.Element {
         cleanupSwitch()
         cleanupUsage()
         cleanupLogin()
+        cleanupCodexAuth()
         window.removeEventListener('contextmenu', handleRightClick)
     }
   }, [])
@@ -114,6 +142,36 @@ function App(): JSX.Element {
   const handleClose = () => window.api.closeApp()
   const handleBack = () => setView('monitor')
   const handleClaudeLogin = () => window.api.loginClaude()
+
+  /**
+   * Starts device-code reauthentication for one isolated devserver account.
+   *
+   * @param {CodexAccountId} accountId - Account A or B.
+   * @returns {Promise<void>} Resolves after the challenge is displayed or an error is recorded.
+   */
+  const handleCodexReauthenticate = async (accountId: CodexAccountId): Promise<void> => {
+      setCodexAuthFlows((current) => ({ ...current, [accountId]: { status: 'starting' } }))
+      try {
+          const challenge = await window.api.reauthenticateCodexAccount(accountId)
+          setCodexAuthFlows((current) => ({
+              ...current,
+              [accountId]: {
+                  status: 'awaiting',
+                  verificationUrl: challenge.verificationUrl,
+                  userCode: challenge.userCode
+              }
+          }))
+          await window.api.openCodexAuthUrl(challenge.verificationUrl)
+      } catch (error) {
+          setCodexAuthFlows((current) => ({
+              ...current,
+              [accountId]: {
+                  status: 'error',
+                  error: error instanceof Error ? error.message : 'Authentication failed'
+              }
+          }))
+      }
+  }
 
   const handleCheckCli = async () => {
       setCheckingCli(true)
@@ -186,11 +244,43 @@ function App(): JSX.Element {
         viewport.height / BASE_MONITOR_HEIGHT
       )
 
-      // Define providers
+      const remoteCodexAccounts =
+          usageData.openai?.source === 'devserver' && Array.isArray(usageData.openai.accounts)
+            ? usageData.openai.accounts
+            : null
+      const localCodexFallback = usageData.openai?.source === 'devserver'
+        ? usageData.openai.localFallback
+        : usageData.openai
+      const showLocalCodexFallback =
+        remoteCodexAccounts?.every((account: any) => account.status === 'unavailable') && localCodexFallback
+      const codexProviders = remoteCodexAccounts && !showLocalCodexFallback
+        ? remoteCodexAccounts.map((account: any) => ({
+            key: `openai-${account.id}`,
+            label: `Codex ${account.label}`,
+            shortLabel: account.label,
+            data: account,
+            icon: openaiSimpleIcon,
+            color: '#10a37f',
+            status: account.status,
+            resetCredits: account.availableResetCredits,
+            detail: account.email || account.error || `Account ${account.label}`
+          }))
+        : [{
+            key: 'openai',
+            label: 'Codex',
+            shortLabel: 'Codex',
+            data: localCodexFallback,
+            icon: openaiSimpleIcon,
+            color: '#10a37f',
+            status: localCodexFallback ? 'connected' : null,
+            resetCredits: null,
+            detail: 'Local Windows Codex'
+          }]
+
       const providers = [
-          { key: 'openai', label: 'Codex', data: usageData.openai, icon: openaiSimpleIcon, color: '#10a37f' },
-          { key: 'anthropic', label: 'Claude', data: usageData.anthropic, icon: claudeSimpleIcon, color: '#d97706' },
-          { key: 'gemini', label: 'Gemini', data: usageData.gemini, icon: geminiSimpleIcon, color: '#2563eb' }
+          ...codexProviders,
+          { key: 'anthropic', label: 'Claude', shortLabel: 'Claude', data: usageData.anthropic, icon: claudeSimpleIcon, color: '#d97706', status: usageData.anthropic ? 'connected' : null, resetCredits: null, detail: 'Windows Claude session' },
+          { key: 'gemini', label: 'Gemini', shortLabel: 'Gemini', data: usageData.gemini, icon: geminiSimpleIcon, color: '#2563eb', status: usageData.gemini ? 'connected' : null, resetCredits: null, detail: 'Gemini' }
       ]
 
       // Filter: Show provider if data is NOT null
@@ -202,6 +292,12 @@ function App(): JSX.Element {
           if (percent > 75) return '#f59e0b' // Yellow/Orange
           return baseColor // Default brand color
       }
+
+      const compactRings = activeProviders.length >= 4
+      const ringSize = compactRings ? 50 : 64
+      const ringRadius = compactRings ? 22 : 28
+      const ringCenter = ringSize / 2
+      const ringCircumference = 2 * Math.PI * ringRadius
 
       return (
         <div 
@@ -266,32 +362,38 @@ function App(): JSX.Element {
                       <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-600 select-none">
                         {quotaMode === 'session' ? 'Session usage' : 'Period usage'}
                       </div>
-                      <div className="flex items-center justify-center space-x-10">
+                      <div className="flex items-center justify-center" style={{ gap: compactRings ? '12px' : '40px' }}>
                         {activeProviders.map((p) => {
                             const percent = getDisplayedPercent(p.data)
-                            const ringColor = getRingColor(percent, p.color)
+                            const accountUnavailable = p.status && p.status !== 'connected'
+                            const ringColor = accountUnavailable ? '#ef4444' : getRingColor(percent, p.color)
+                            const statusLabel = p.status === 'authentication-required'
+                              ? 'login'
+                              : p.status === 'unavailable'
+                                ? 'offline'
+                                : `${percent}%`
                             
                             return (
-                                <div key={p.key} className="flex flex-col items-center group/item relative">
+                                <div key={p.key} className="flex flex-col items-center group/item relative" title={p.detail}>
                                     <div 
                                         className="relative mb-1 flex items-center justify-center"
-                                        style={{ width: '64px', height: '64px', flexShrink: 0 }}
+                                        style={{ width: `${ringSize}px`, height: `${ringSize}px`, flexShrink: 0 }}
                                     >
                                         {/* Background Ring */}
                                         <svg 
                                             className="absolute top-0 left-0" 
                                             style={{ width: '100%', height: '100%', pointerEvents: 'none', transform: 'rotate(-90deg)' }}
                                         >
-                                           <circle cx="32" cy="32" r="28" stroke="#cbd5e1" strokeWidth="3" fill="transparent" />
+                                           <circle cx={ringCenter} cy={ringCenter} r={ringRadius} stroke="#cbd5e1" strokeWidth="3" fill="transparent" />
                                            {/* Progress Ring */}
                                            <circle 
-                                                cx="32" 
-                                                cy="32" 
-                                                r="28" 
+                                                cx={ringCenter}
+                                                cy={ringCenter}
+                                                r={ringRadius}
                                                 stroke={ringColor} 
                                                 strokeWidth="3" 
                                                 fill="transparent" 
-                                                strokeDasharray={`${percent * 1.76} 176`} 
+                                                strokeDasharray={`${(percent / 100) * ringCircumference} ${ringCircumference}`}
                                                 strokeLinecap="butt" 
                                                 className="transition-all duration-500 ease-out"
                                             />
@@ -299,16 +401,26 @@ function App(): JSX.Element {
                                         
                                         {/* Icon in Center - Absolutely centered to avoid layout shift */}
                                         <div style={{ color: p.color, zIndex: 10, position: 'relative' }}> 
-                                            <img src={p.icon} alt={`${p.label} icon`} style={{ width: 22, height: 22, display: 'block' }} />
+                                            <img src={p.icon} alt={`${p.label} icon`} style={{ width: compactRings ? 18 : 22, height: compactRings ? 18 : 22, display: 'block', opacity: accountUnavailable ? 0.4 : 1 }} />
                                         </div>
+                                        {typeof p.resetCredits === 'number' && (
+                                            <span
+                                              className={`absolute -top-1 -right-2 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold leading-none text-white shadow-sm ${p.resetCredits > 0 ? 'bg-emerald-600' : 'bg-slate-400'}`}
+                                              title={`${p.resetCredits} reset credits available`}
+                                            >
+                                                +{p.resetCredits}
+                                            </span>
+                                        )}
                                     </div>
-                                    <span className="text-[10px] font-bold text-slate-600 select-none tracking-wide">{p.label} ({percent}%)</span>
+                                    <span className={`font-bold select-none tracking-wide ${compactRings ? 'text-[9px]' : 'text-[10px]'} ${accountUnavailable ? 'text-red-600' : 'text-slate-600'}`}>
+                                      {p.label} ({statusLabel})
+                                    </span>
                                 </div>
                             )
                         })}
                       </div>
-                      <div className="text-[10px] text-slate-500 select-none">
-                        Resets: {activeProviders.map((p) => `${p.label}: ${getDisplayedReset(p.data)}`).join(' | ')}
+                      <div className="max-w-[292px] text-center text-[9px] leading-tight text-slate-500 select-none">
+                        Resets: {activeProviders.map((p) => `${p.shortLabel}: ${p.status === 'authentication-required' ? 'login' : p.status === 'unavailable' ? 'offline' : getDisplayedReset(p.data)}`).join(' | ')}
                       </div>
                     </div>
                 )}
@@ -320,6 +432,11 @@ function App(): JSX.Element {
   }
 
   if (view === 'settings') {
+    const settingsCodexAccounts =
+      usageData.openai?.source === 'devserver' && Array.isArray(usageData.openai.accounts)
+        ? usageData.openai.accounts
+        : []
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', backgroundColor: '#e2e8f0', color: '#0f172a', boxSizing: 'border-box', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: '1px solid #cbd5e1', backgroundColor: '#e2e8f0', flexShrink: 0, userSelect: 'none' }}>
@@ -335,9 +452,95 @@ function App(): JSX.Element {
            </button>
         </div>
         <div className="no-drag scrollbar-thin scrollbar-thumb-slate-400 scrollbar-track-transparent" style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-             <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-600 uppercase tracking-wide block ml-1">Codex API Key (OpenAI)</label>
-                <input type="password" value={settings.openaiKey} onChange={(e) => setSettings({...settings, openaiKey: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 placeholder-slate-400 shadow-sm transition-all" placeholder="sk-..." />
+             <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-600 uppercase tracking-wide block ml-1">Codex / OpenAI</label>
+                    <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={settings.codexRemoteEnabled !== false}
+                          onChange={(event) => setSettings({ ...settings, codexRemoteEnabled: event.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        devserver A/B
+                    </label>
+                </div>
+
+                {settings.codexRemoteEnabled !== false && (
+                  <div className="space-y-2">
+                    {(['a', 'b'] as CodexAccountId[]).map((accountId) => {
+                      const account = settingsCodexAccounts.find((candidate: any) => candidate.id === accountId)
+                      const flow = codexAuthFlows[accountId]
+                      const connected = account?.status === 'connected'
+                      const pending = flow?.status === 'starting' || flow?.status === 'awaiting'
+                      const statusText = connected
+                        ? 'Connected'
+                        : account?.status === 'authentication-required'
+                          ? 'Login required'
+                          : account?.status === 'unavailable'
+                            ? 'Unavailable'
+                            : 'Checking'
+
+                      return (
+                        <div key={accountId} className="rounded-lg border border-slate-300 bg-white p-3 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-extrabold text-slate-700">Account {accountId.toUpperCase()}</span>
+                                <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${connected ? 'bg-green-100 text-green-700' : account?.status === 'authentication-required' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-500'}`}>
+                                  {statusText}
+                                </span>
+                                {typeof account?.availableResetCredits === 'number' && (
+                                  <span
+                                    className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold text-white ${account.availableResetCredits > 0 ? 'bg-emerald-600' : 'bg-slate-400'}`}
+                                    title={`${account.availableResetCredits} reset credits available`}
+                                  >
+                                    +{account.availableResetCredits}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-1 truncate text-[10px] text-slate-500">
+                                {account?.email || account?.error || 'Waiting for devserver status'}
+                                {account?.plan ? ` · ${account.plan}` : ''}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleCodexReauthenticate(accountId)}
+                              disabled={pending}
+                              className="flex shrink-0 items-center gap-1 rounded border border-slate-300 bg-slate-50 px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60"
+                            >
+                              <RefreshCw size={12} className={pending ? 'animate-spin' : ''} />
+                              {pending ? 'Waiting' : connected ? 'Re-authenticate' : 'Sign in'}
+                            </button>
+                          </div>
+
+                          {flow?.status === 'awaiting' && flow.verificationUrl && flow.userCode && (
+                            <div className="mt-2 rounded border border-blue-200 bg-blue-50 p-2 text-[10px] text-blue-900">
+                              <div>Enter code <span className="font-mono text-xs font-extrabold tracking-wider">{flow.userCode}</span></div>
+                              <button
+                                type="button"
+                                onClick={() => window.api.openCodexAuthUrl(flow.verificationUrl!)}
+                                className="mt-1 flex items-center gap-1 font-bold text-blue-700 hover:text-blue-900"
+                              >
+                                <ExternalLink size={11} /> Open sign-in page
+                              </button>
+                            </div>
+                          )}
+                          {flow?.status === 'success' && (
+                            <div className="mt-2 text-[10px] font-bold text-green-700">Authentication completed.</div>
+                          )}
+                          {flow?.status === 'error' && (
+                            <div className="mt-2 text-[10px] font-medium text-red-700">{flow.error || 'Authentication failed'}</div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                <label className="text-[10px] font-bold uppercase tracking-wide text-slate-500 block ml-1">Local fallback API key</label>
+                <input type="password" value={settings.openaiKey} onChange={(e) => setSettings({...settings, openaiKey: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 placeholder-slate-400 shadow-sm transition-all" placeholder="Optional sk-..." />
             </div>
             <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-600 uppercase tracking-wide block ml-1">Gemini API Key</label>
