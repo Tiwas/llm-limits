@@ -8,6 +8,7 @@
     "preview": "electron-vite preview",
     "dist": "npm run build && electron-builder",
     "postdist": "node scripts/cleanup-dist.mjs",
+    "browsers:update": "npx update-browserslist-db@latest",
     "format": "prettier --write .",
     "secrets:check": "node scripts/secret-check.mjs",
     "hooks:install": "git config core.hooksPath .githooks"
